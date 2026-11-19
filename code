@@ -1,0 +1,660 @@
+"""
+MindSpark - AIB Smart Crop Storage Monitor   (English | हिन्दी | मराठी)
+Run:  pip install -r requirements.txt
+      streamlit run app.py
+Demo login: admin / mindspark123
+"""
+import calendar
+import random
+from datetime import date, datetime, timedelta
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+try:
+    import requests
+except ImportError:
+    requests = None
+try:
+    from fpdf import FPDF
+except ImportError:
+    FPDF = None
+
+st.set_page_config(page_title="MindSpark | AIB Smart Crop Storage Monitor",
+                   page_icon="🌾", layout="wide")
+
+# ----------------------------------------------------------------------------
+# LANGUAGES  -  TR maps English text -> (Hindi, Marathi)
+# To add or fix a translation, just edit this table.
+# ----------------------------------------------------------------------------
+LANGS = {"English": "en", "हिन्दी": "hi", "मराठी": "mr"}
+
+TR = {
+    "AIB Smart Crop Storage Monitor": ("एआईबी स्मार्ट फसल भंडारण मॉनिटर", "एआयबी स्मार्ट पीक साठवण मॉनिटर"),
+    "Language": ("भाषा", "भाषा"),
+    "Login": ("लॉगिन", "लॉगिन"),
+    "Logout": ("लॉगआउट", "लॉगआउट"),
+    "Username": ("उपयोगकर्ता नाम", "वापरकर्तानाव"),
+    "Password": ("पासवर्ड", "पासवर्ड"),
+    "Invalid username or password": ("गलत उपयोगकर्ता नाम या पासवर्ड", "चुकीचे वापरकर्तानाव किंवा पासवर्ड"),
+    "OVERVIEW": ("अवलोकन", "आढावा"),
+    "OPERATIONS": ("संचालन", "कामकाज"),
+    # pages
+    "Dashboard": ("डैशबोर्ड", "डॅशबोर्ड"),
+    "Crop Monitoring": ("फसल निगरानी", "पीक देखरेख"),
+    "AI Prediction": ("एआई भविष्यवाणी", "एआय अंदाज"),
+    "Analytics": ("विश्लेषण", "विश्लेषण"),
+    "Alerts": ("अलर्ट", "अलर्ट"),
+    "Report & History": ("रिपोर्ट और इतिहास", "अहवाल आणि इतिहास"),
+    "Farmer Profile": ("किसान प्रोफ़ाइल", "शेतकरी प्रोफाइल"),
+    # dashboard
+    "Connect ESP32 sensor (temperature & humidity)": ("ESP32 सेंसर जोड़ें (तापमान और आर्द्रता)", "ESP32 सेन्सर जोडा (तापमान आणि आर्द्रता)"),
+    "Use live ESP32 data": ("लाइव ESP32 डेटा उपयोग करें", "लाइव्ह ESP32 डेटा वापरा"),
+    "ESP32 URL": ("ESP32 URL", "ESP32 URL"),
+    "Data source": ("डेटा स्रोत", "डेटा स्रोत"),
+    "Demo data": ("डेमो डेटा", "डेमो डेटा"),
+    "ESP32 (live)": ("ESP32 (लाइव)", "ESP32 (लाइव्ह)"),
+    "Demo data (ESP32 not reachable)": ("डेमो डेटा (ESP32 उपलब्ध नहीं)", "डेमो डेटा (ESP32 उपलब्ध नाही)"),
+    "Storage Overview": ("भंडारण अवलोकन", "साठवण आढावा"),
+    "Storage Health": ("भंडारण स्वास्थ्य", "साठवण आरोग्य"),
+    "Stable Units": ("स्थिर यूनिट", "स्थिर युनिट"),
+    "Open Alerts": ("खुले अलर्ट", "खुले अलर्ट"),
+    "Avg Temperature": ("औसत तापमान", "सरासरी तापमान"),
+    "Monthly Temperature & Humidity": ("मासिक तापमान और आर्द्रता", "मासिक तापमान आणि आर्द्रता"),
+    "Month": ("महीना", "महिना"),
+    "Year": ("वर्ष", "वर्ष"),
+    "Day": ("दिन", "दिवस"),
+    "Date (day of month)": ("तारीख (महीने का दिन)", "तारीख (महिन्याचा दिवस)"),
+    "Humidity (%)": ("आर्द्रता (%)", "आर्द्रता (%)"),
+    "Temperature (°C)": ("तापमान (°C)", "तापमान (°C)"),
+    "Enter Crop Details": ("फसल की जानकारी दर्ज करें", "पिकाची माहिती भरा"),
+    "Storage unit": ("भंडारण यूनिट", "साठवण युनिट"),
+    "Unit": ("यूनिट", "युनिट"),
+    "Crop": ("फसल", "पीक"),
+    "Quantity (kg)": ("मात्रा (किलो)", "प्रमाण (किलो)"),
+    "Stored on": ("भंडारण तिथि", "साठवण तारीख"),
+    "Add crop": ("फसल जोड़ें", "पीक जोडा"),
+    "Remove an entry": ("एंट्री हटाएं", "नोंद काढा"),
+    "Remove": ("हटाएं", "काढा"),
+    "kg": ("किलो", "किलो"),
+    # crops
+    "Onion": ("प्याज", "कांदा"), "Potato": ("आलू", "बटाटा"), "Tomato": ("टमाटर", "टोमॅटो"),
+    "Wheat": ("गेहूं", "गहू"), "Rice": ("चावल", "तांदूळ"), "Maize": ("मक्का", "मका"),
+    "Apple": ("सेब", "सफरचंद"), "Banana": ("केला", "केळी"),
+    # monitoring
+    "Temperature and humidity are detected automatically.": ("तापमान और आर्द्रता अपने-आप पता चलती है।", "तापमान आणि आर्द्रता आपोआप मोजली जाते."),
+    "No crops yet. Add crop details on the Dashboard first.": ("अभी कोई फसल नहीं। पहले डैशबोर्ड में फसल जोड़ें।", "अजून पीक नाही. आधी डॅशबोर्डमध्ये पीक जोडा."),
+    "Temp": ("तापमान", "तापमान"), "Humidity": ("आर्द्रता", "आर्द्रता"),
+    "Status": ("स्थिति", "स्थिती"), "Ideal": ("आदर्श", "आदर्श"),
+    "Very Normal": ("बहुत सामान्य", "अतिशय सामान्य"),
+    "Normal": ("सामान्य", "सामान्य"),
+    "High Risk": ("उच्च जोखिम", "उच्च धोका"),
+    "High risk": ("उच्च जोखिम", "उच्च धोका"),
+    "Very normal": ("बहुत सामान्य", "अतिशय सामान्य"),
+    # AI
+    "Spoilage Risk Score": ("खराबी जोखिम स्कोर", "खराब होण्याचा धोका गुण"),
+    "Shelf Life Remaining": ("शेष भंडारण आयु", "उरलेले आयुष्य"),
+    "days": ("दिन", "दिवस"),
+    "Risk Score by Crop": ("फसल अनुसार जोखिम स्कोर", "पिकानुसार धोका गुण"),
+    "Spoilage risk (%)": ("खराबी जोखिम (%)", "खराब होण्याचा धोका (%)"),
+    # analytics
+    "Crop Sold": ("बिकी फसल", "विकलेले पीक"),
+    "Profit": ("लाभ", "नफा"),
+    "Loss": ("हानि", "तोटा"),
+    "Crop sold per month": ("प्रति माह बिकी फसल", "दरमहा विकलेले पीक"),
+    "Profit vs Loss": ("लाभ बनाम हानि", "नफा विरुद्ध तोटा"),
+    "Season Trends": ("मौसमी रुझान", "हंगामी कल"),
+    "Winter": ("सर्दी", "हिवाळा"), "Summer": ("गर्मी", "उन्हाळा"),
+    "Monsoon": ("बरसात", "पावसाळा"), "Post-Monsoon": ("मानसून के बाद", "पावसाळ्यानंतर"),
+    "Avg temperature (°C)": ("औसत तापमान (°C)", "सरासरी तापमान (°C)"),
+    "Avg humidity (%)": ("औसत आर्द्रता (%)", "सरासरी आर्द्रता (%)"),
+    # alerts
+    "Open": ("खुले", "खुले"),
+    "Snoozed": ("स्थगित", "पुढे ढकललेले"),
+    "Resolved this season": ("इस सीजन सुलझे", "या हंगामात निकाली"),
+    "Search units, crop, alert and alert rules": ("यूनिट, फसल, अलर्ट और नियम खोजें", "युनिट, पीक, अलर्ट आणि नियम शोधा"),
+    "Mark all as read": ("सभी पढ़ा हुआ करें", "सर्व वाचले म्हणून खूण करा"),
+    "All": ("सभी", "सर्व"),
+    "Critical": ("गंभीर", "गंभीर"),
+    "Warning": ("चेतावनी", "इशारा"),
+    "Info": ("जानकारी", "माहिती"),
+    "Read": ("पढ़ा", "वाचले"),
+    "Snooze": ("टालें", "पुढे ढकला"),
+    "No open alerts here": ("यहां कोई खुला अलर्ट नहीं", "येथे कोणताही खुला अलर्ट नाही"),
+    "Spoilage risk": ("खराबी जोखिम", "खराबीचा धोका"),
+    "Immediate action needed": ("तुरंत कार्रवाई करें", "त्वरित कृती करा"),
+    "Conditions are getting worse": ("स्थिति बिगड़ रही है", "स्थिती बिघडत आहे"),
+    "All values are safe": ("सभी मान सुरक्षित हैं", "सर्व मूल्ये सुरक्षित आहेत"),
+    "Temperature too high": ("तापमान बहुत ज़्यादा", "तापमान जास्त"),
+    "Humidity too high": ("आर्द्रता बहुत ज़्यादा", "आर्द्रता जास्त"),
+    "Notification Channels": ("सूचना माध्यम", "सूचना माध्यमे"),
+    "Level": ("स्तर", "स्तर"),
+    "Delivery": ("भेजने का तरीका", "पाठवण्याची पद्धत"),
+    "SMS + Email immediately": ("तुरंत SMS + ईमेल", "त्वरित SMS + ईमेल"),
+    "SMS within 15 minutes": ("15 मिनट में SMS", "15 मिनिटांत SMS"),
+    "Regular information in app only": ("सामान्य जानकारी केवल ऐप में", "सामान्य माहिती फक्त अॅपमध्ये"),
+    "Device health": ("डिवाइस स्वास्थ्य", "डिव्हाइस आरोग्य"),
+    "Weekly summary": ("साप्ताहिक सारांश", "साप्ताहिक सारांश"),
+    "Alert Rules": ("अलर्ट नियम", "अलर्ट नियम"),
+    # reports
+    "Storage Report": ("भंडारण रिपोर्ट", "साठवण अहवाल"),
+    "Alert Report": ("अलर्ट रिपोर्ट", "अलर्ट अहवाल"),
+    "Monthly Climate Report": ("मासिक मौसम रिपोर्ट", "मासिक हवामान अहवाल"),
+    "Activity History": ("गतिविधि इतिहास", "कृती इतिहास"),
+    "History": ("इतिहास", "इतिहास"),
+    "PDF reports are in English.": ("PDF रिपोर्ट अंग्रेज़ी में हैं।", "PDF अहवाल इंग्रजीत आहेत."),
+    "Time": ("समय", "वेळ"), "Event": ("घटना", "घटना"),
+    # profile
+    "Farmer name": ("किसान का नाम", "शेतकऱ्याचे नाव"),
+    "Phone number (alerts are sent here)": ("फ़ोन नंबर (अलर्ट यहां भेजे जाएंगे)", "फोन नंबर (अलर्ट येथे पाठवले जातील)"),
+    "Email": ("ईमेल", "ईमेल"),
+    "Save profile": ("प्रोफ़ाइल सहेजें", "प्रोफाइल जतन करा"),
+    "Profile saved": ("प्रोफ़ाइल सहेजी गई", "प्रोफाइल जतन केले"),
+}
+
+MONTHS = {
+    "en": list(calendar.month_abbr)[1:],
+    "hi": ["जनवरी", "फरवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"],
+    "mr": ["जानेवारी", "फेब्रुवारी", "मार्च", "एप्रिल", "मे", "जून", "जुलै", "ऑगस्ट", "सप्टेंबर", "ऑक्टोबर", "नोव्हेंबर", "डिसेंबर"],
+}
+FULL_EN = list(calendar.month_name)[1:]
+
+# ----------------------------------------------------------------------------
+# CONFIG
+# ----------------------------------------------------------------------------
+USERS = {"admin": "mindspark123"}
+GREEN, DARK_GREEN, BLUE, RED = "#2e9e5b", "#14532d", "#2563eb", "#dc2626"
+
+CROPS = {  # ideal temp (C), humidity (%), base shelf life (days)
+    "Onion": {"t": (20, 30), "h": (60, 70), "life": 180},
+    "Potato": {"t": (7, 12), "h": (85, 90), "life": 150},
+    "Tomato": {"t": (12, 15), "h": (85, 90), "life": 14},
+    "Wheat": {"t": (10, 25), "h": (40, 60), "life": 365},
+    "Rice": {"t": (15, 25), "h": (55, 65), "life": 365},
+    "Maize": {"t": (10, 20), "h": (55, 70), "life": 270},
+    "Apple": {"t": (0, 4), "h": (90, 95), "life": 90},
+    "Banana": {"t": (13, 15), "h": (85, 95), "life": 7},
+}
+NAV_MAIN = [("🏠", "Dashboard"), ("🌱", "Crop Monitoring"), ("🤖", "AI Prediction"), ("📊", "Analytics")]
+NAV_OPS = [("🚨", "Alerts"), ("📄", "Report & History")]
+NAV_PROFILE = ("👨‍🌾", "Farmer Profile")
+
+# ----------------------------------------------------------------------------
+# STATE + translation helper
+# ----------------------------------------------------------------------------
+ss = st.session_state
+ss.setdefault("lang", "en")
+ss.setdefault("logged_in", False)
+ss.setdefault("page", "Dashboard")
+ss.setdefault("crops", [
+    {"unit": "Unit 1", "crop": "Onion", "qty": 500, "stored_on": date.today() - timedelta(days=40)},
+    {"unit": "Unit 2", "crop": "Tomato", "qty": 200, "stored_on": date.today() - timedelta(days=5)},
+    {"unit": "Unit 3", "crop": "Potato", "qty": 350, "stored_on": date.today() - timedelta(days=60)},
+])
+ss.setdefault("read_alerts", set())
+ss.setdefault("snoozed", set())
+ss.setdefault("history", [])
+ss.setdefault("profile", {"name": "Ramesh Patil", "phone": "+91 98765 43210", "email": "ramesh.patil@example.com"})
+ss.setdefault("esp_on", False)
+ss.setdefault("esp_url", "http://192.168.1.50/data")
+
+
+def t(text):
+    """Translate an English UI string into the selected language."""
+    if ss.lang == "en":
+        return text
+    pair = TR.get(text)
+    if not pair:
+        return text
+    return pair[0] if ss.lang == "hi" else pair[1]
+
+
+def disp_unit(u):
+    return u.replace("Unit ", t("Unit") + " ") if u.startswith("Unit ") else u
+
+
+def month_name(m):  # m = 1..12
+    return FULL_EN[m - 1] if ss.lang == "en" else MONTHS[ss.lang][m - 1]
+
+
+def lang_picker(where, key):
+    labels = list(LANGS)
+    current = [k for k, v in LANGS.items() if v == ss.lang][0]
+    choice = where.selectbox("🌐 " + t("Language"), labels, index=labels.index(current), key=key)
+    if LANGS[choice] != ss.lang:
+        ss.lang = LANGS[choice]
+        st.rerun()
+
+
+def log(event):
+    ss.history.insert(0, {"Time": datetime.now().strftime("%d %b %Y %H:%M"), "Event": event})
+
+
+# ----------------------------------------------------------------------------
+# STYLE
+# ----------------------------------------------------------------------------
+st.markdown(f"""
+<style>
+.stApp, [data-testid="stHeader"] {{ background:#ffffff; }}
+[data-testid="stSidebar"] {{ background:#ffffff; border-right:1px solid #e5e7eb; }}
+html, body, p, span, label, h1, h2, h3, h4, li, div {{ color:#111111; }}
+.brand {{ font-size:28px; font-weight:800; color:#111; margin:0; }}
+.sub {{ font-size:13px; color:#111; margin:0 0 10px 0; }}
+.section {{ font-size:12px; font-weight:700; letter-spacing:1px; margin:14px 0 4px; color:#111; }}
+[data-testid="stSidebar"] .stButton > button {{
+    width:100%; justify-content:flex-start; text-align:left; border:none;
+    background:#ffffff; color:#111111; border-radius:999px; padding:8px 16px; font-weight:500; }}
+[data-testid="stSidebar"] .stButton > button:hover {{ background:#f1f5f2; color:#111; }}
+[data-testid="stSidebar"] .stButton > button[kind="primary"] {{ background:{DARK_GREEN}; color:#ffffff; font-weight:700; }}
+[data-testid="stSidebar"] .stButton > button[kind="primary"] p {{ color:#ffffff; }}
+[data-testid="stMetric"] {{ background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:14px 18px; }}
+</style>
+""", unsafe_allow_html=True)
+
+# ----------------------------------------------------------------------------
+# LOGIN
+# ----------------------------------------------------------------------------
+if not ss.logged_in:
+    _, mid, _ = st.columns([1, 1.2, 1])
+    with mid:
+        st.markdown("<p class='brand'>MindSpark</p>", unsafe_allow_html=True)
+        st.markdown(f"<p class='sub'>{t('AIB Smart Crop Storage Monitor')}</p>", unsafe_allow_html=True)
+        lang_picker(st, "lang_login")
+        st.subheader("🔐 " + t("Login"))
+        user = st.text_input("👤 " + t("Username"))
+        pwd = st.text_input("🔑 " + t("Password"), type="password")
+        if st.button(t("Login"), type="primary", use_container_width=True):
+            if USERS.get(user) == pwd and pwd:
+                ss.logged_in = True
+                log(f"User '{user}' logged in")
+                st.rerun()
+            else:
+                st.error(t("Invalid username or password"))
+        st.caption("Demo: admin / mindspark123")
+    st.stop()
+
+# ----------------------------------------------------------------------------
+# SENSOR DATA
+# ----------------------------------------------------------------------------
+def read_esp32():
+    """ESP32 should return JSON like {"temperature": 27.5, "humidity": 64}."""
+    if requests is None:
+        return None
+    try:
+        j = requests.get(ss.esp_url, timeout=3).json()
+        return float(j["temperature"]), float(j["humidity"])
+    except Exception:
+        return None
+
+
+def base_reading():
+    if ss.esp_on:
+        val = read_esp32()
+        if val:
+            return val, "ESP32 (live)"
+        return (28 + random.uniform(-1, 1), 65 + random.uniform(-3, 3)), "Demo data (ESP32 not reachable)"
+    return (28 + random.uniform(-1.5, 1.5), 65 + random.uniform(-4, 4)), "Demo data"
+
+
+def crop_readings():
+    (bt, bh), source = base_reading()
+    rows = []
+    for i, c in enumerate(ss.crops):
+        spec = CROPS[c["crop"]]
+        rng = random.Random(f"{c['unit']}{c['crop']}{datetime.now():%Y%m%d%H}")
+        if source == "ESP32 (live)" and i == 0:
+            tt, hh = bt, bh  # first unit is wired to the ESP32
+        else:
+            tt = sum(spec["t"]) / 2 + rng.uniform(-4, 6)
+            hh = sum(spec["h"]) / 2 + rng.uniform(-8, 12)
+        rows.append({**c, "temp": round(tt, 1), "hum": round(min(hh, 100), 1)})
+    return rows, source
+
+
+def risk_calc(c):
+    spec = CROPS[c["crop"]]
+    td = max(0, spec["t"][0] - c["temp"], c["temp"] - spec["t"][1])
+    hd = max(0, spec["h"][0] - c["hum"], c["hum"] - spec["h"][1])
+    days = (date.today() - c["stored_on"]).days
+    risk = min(100, td * 6 + hd * 1.8 + (days / spec["life"]) * 25)
+    left = max(0, round(spec["life"] * (1 - risk / 100) - days))
+    return round(risk, 1), left
+
+
+def status_of(risk):
+    if risk < 20:
+        return "Very Normal", GREEN, "🟢"
+    if risk < 50:
+        return "Normal", BLUE, "🔵"
+    return "High Risk", RED, "🔴"
+
+
+readings, source = crop_readings()
+for r in readings:
+    r["risk"], r["left"] = risk_calc(r)
+    r["status"], r["color"], r["dot"] = status_of(r["risk"])
+
+
+def build_alerts():
+    out = []
+    for r in readings:
+        spec = CROPS[r["crop"]]
+        if r["risk"] >= 50:
+            lvl, msg = "Critical", f"{t('Spoilage risk')} {r['risk']}% - {t('Immediate action needed')}"
+        elif r["risk"] >= 20:
+            lvl, msg = "Warning", f"{t('Conditions are getting worse')} ({r['temp']}°C, {r['hum']}%)"
+        else:
+            lvl, msg = "Info", t("All values are safe")
+        if r["temp"] > spec["t"][1]:
+            msg += f" | {t('Temperature too high')}"
+        if r["hum"] > spec["h"][1]:
+            msg += f" | {t('Humidity too high')}"
+        out.append({"id": f"{r['unit']}-{r['crop']}", "unit": r["unit"], "crop": r["crop"], "level": lvl, "message": msg})
+    return out
+
+
+alerts = build_alerts()
+open_alerts = [a for a in alerts if a["id"] not in ss.read_alerts and a["id"] not in ss.snoozed and a["level"] != "Info"]
+
+# ----------------------------------------------------------------------------
+# SIDEBAR
+# ----------------------------------------------------------------------------
+def nav_button(icon, name):
+    if st.sidebar.button(f"{icon}  {t(name)}", key=f"nav_{name}",
+                         type="primary" if ss.page == name else "secondary"):
+        ss.page = name
+        st.rerun()
+
+
+st.sidebar.markdown("<p class='brand'>MindSpark</p>", unsafe_allow_html=True)
+st.sidebar.markdown(f"<p class='sub'>{t('AIB Smart Crop Storage Monitor')}</p>", unsafe_allow_html=True)
+lang_picker(st.sidebar, "lang_side")
+st.sidebar.markdown(f"<p class='section'>{t('OVERVIEW')}</p>", unsafe_allow_html=True)
+for ic, nm in NAV_MAIN:
+    nav_button(ic, nm)
+st.sidebar.markdown(f"<p class='section'>{t('OPERATIONS')}</p>", unsafe_allow_html=True)
+for ic, nm in NAV_OPS:
+    nav_button(ic, nm)
+st.sidebar.markdown("<br>" * 3, unsafe_allow_html=True)
+st.sidebar.divider()
+nav_button(*NAV_PROFILE)
+if st.sidebar.button("🚪  " + t("Logout")):
+    ss.logged_in = False
+    st.rerun()
+
+page = ss.page
+
+# ----------------------------------------------------------------------------
+# HELPERS
+# ----------------------------------------------------------------------------
+def monthly_series(year, month):
+    n = calendar.monthrange(year, month)[1]
+    rng = np.random.default_rng(year * 100 + month)
+    days = np.arange(1, n + 1)
+    temp = 27 + 4 * np.sin(days / 5) + rng.normal(0, 0.8, n)
+    hum = 65 + 8 * np.cos(days / 6) + rng.normal(0, 2, n)
+    df = pd.DataFrame({"Day": days, "Temperature (C)": temp.round(1), "Humidity (%)": hum.round(1)})
+    if ss.esp_on and (year, month) == (date.today().year, date.today().month):
+        (tt, hh), _ = base_reading()
+        df.loc[df["Day"] == date.today().day, ["Temperature (C)", "Humidity (%)"]] = [round(tt, 1), round(hh, 1)]
+    return df
+
+
+def white_fig(fig, h=360):
+    fig.update_layout(paper_bgcolor="white", plot_bgcolor="white", height=h, font=dict(color="#111"),
+                      margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h", y=-0.2))
+    fig.update_xaxes(gridcolor="#eee")
+    fig.update_yaxes(gridcolor="#eee")
+    return fig
+
+
+def make_pdf(title, df):  # PDFs stay in English (built-in PDF fonts have no Devanagari)
+    if FPDF is None:
+        return None
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "MindSpark - AIB Smart Crop Storage Monitor", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 9, title, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 6, f"Generated: {datetime.now():%d %b %Y %H:%M}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+    w = 190 / max(len(df.columns), 1)
+    pdf.set_font("Helvetica", "B", 9)
+    for col in df.columns:
+        pdf.cell(w, 8, str(col)[:18], border=1)
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 9)
+    for _, row in df.iterrows():
+        for v in row:
+            pdf.cell(w, 7, str(v)[:22].encode("latin-1", "replace").decode("latin-1"), border=1)
+        pdf.ln()
+    return bytes(pdf.output())
+
+
+LEGEND = f"🔴 {t('High risk')}   🔵 {t('Normal')}   🟢 {t('Very normal')}"
+
+# ----------------------------------------------------------------------------
+# PAGES
+# ----------------------------------------------------------------------------
+if page == "Dashboard":
+    st.title("🏠 " + t("Dashboard"))
+
+    with st.expander("📡 " + t("Connect ESP32 sensor (temperature & humidity)")):
+        ss.esp_on = st.toggle(t("Use live ESP32 data"), value=ss.esp_on)
+        ss.esp_url = st.text_input(t("ESP32 URL"), ss.esp_url)
+        st.caption(f"{t('Data source')}: **{t(source)}**")
+
+    st.subheader("📦 " + t("Storage Overview"))
+    stable = sum(1 for r in readings if r["risk"] < 50)
+    health = round(100 - np.mean([r["risk"] for r in readings]), 1) if readings else 0
+    avg_t = round(np.mean([r["temp"] for r in readings]), 1) if readings else 0
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("💚 " + t("Storage Health"), f"{health}%")
+    c2.metric("✅ " + t("Stable Units"), f"{stable} / {len(readings)}")
+    c3.metric("🔔 " + t("Open Alerts"), len(open_alerts))
+    c4.metric("🌡️ " + t("Avg Temperature"), f"{avg_t} °C")
+
+    st.subheader("📈 " + t("Monthly Temperature & Humidity"))
+    today = date.today()
+    cm, cy = st.columns(2)
+    month = cm.selectbox(t("Month"), list(range(1, 13)), index=today.month - 1, format_func=month_name)
+    year = cy.selectbox(t("Year"), [today.year - 1, today.year, today.year + 1], index=1)
+    df = monthly_series(year, month)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df["Day"], y=df["Humidity (%)"], name=t("Humidity (%)"),
+                             line=dict(color=BLUE, width=3), mode="lines+markers"))
+    fig.add_trace(go.Scatter(x=df["Day"], y=df["Temperature (C)"], name=t("Temperature (°C)"),
+                             line=dict(color=RED, width=3), mode="lines+markers", yaxis="y2"))
+    fig.update_layout(title=f"{month_name(month)} {year}: {t('Day')} 1 - {len(df)}",
+                      xaxis=dict(title=t("Date (day of month)"), dtick=1),
+                      yaxis=dict(title=t("Humidity (%)")),
+                      yaxis2=dict(title=t("Temperature (°C)"), overlaying="y", side="right"))
+    st.plotly_chart(white_fig(fig, 400), use_container_width=True)
+
+    st.subheader("➕ " + t("Enter Crop Details"))
+    with st.form("crop_form", clear_on_submit=True):
+        a, b, c, d = st.columns(4)
+        unit = a.text_input(t("Storage unit"), f"Unit {len(ss.crops) + 1}")
+        crop = b.selectbox(t("Crop"), list(CROPS), format_func=t)
+        qty = c.number_input(t("Quantity (kg)"), 1, 100000, 100)
+        stored = d.date_input(t("Stored on"), date.today())
+        if st.form_submit_button(t("Add crop"), type="primary"):
+            ss.crops.append({"unit": unit, "crop": crop, "qty": int(qty), "stored_on": stored})
+            log(f"Added {crop} ({qty} kg) in {unit}")
+            st.rerun()
+    if ss.crops:
+        rm = st.selectbox("🗑️ " + t("Remove an entry"), ["-"] + [c["unit"] for c in ss.crops], format_func=disp_unit)
+        if rm != "-" and st.button(t("Remove")):
+            ss.crops = [c for c in ss.crops if c["unit"] != rm]
+            log(f"Removed {rm}")
+            st.rerun()
+
+elif page == "Crop Monitoring":
+    st.title("🌱 " + t("Crop Monitoring"))
+    st.caption(f"{t('Data source')}: {t(source)}. {t('Temperature and humidity are detected automatically.')}")
+    if not readings:
+        st.info(t("No crops yet. Add crop details on the Dashboard first."))
+    for r in readings:
+        spec = CROPS[r["crop"]]
+        with st.container(border=True):
+            a, b, c, d, e = st.columns([1.3, 1.2, 1, 1, 1.3])
+            a.markdown(f"**📍 {disp_unit(r['unit'])}**\n\n🌾 {t(r['crop'])} ({r['qty']} {t('kg')})")
+            b.markdown(f"**{t('Stored on')}**\n\n📅 {r['stored_on']:%d-%m-%Y}")
+            c.metric("🌡️ " + t("Temp"), f"{r['temp']} °C")
+            d.metric("💧 " + t("Humidity"), f"{r['hum']} %")
+            e.markdown(f"**{t('Status')}**\n\n{r['dot']} <span style='color:{r['color']};font-weight:700'>"
+                       f"{t(r['status'])}</span>", unsafe_allow_html=True)
+            st.caption(f"{t('Ideal')}: {spec['t'][0]}–{spec['t'][1]} °C, {spec['h'][0]}–{spec['h'][1]} %")
+
+elif page == "AI Prediction":
+    st.title("🤖 " + t("AI Prediction"))
+    if not readings:
+        st.info(t("No crops yet. Add crop details on the Dashboard first."))
+    else:
+        cols = st.columns(min(len(readings), 3))
+        for i, r in enumerate(readings):
+            with cols[i % len(cols)]:
+                with st.container(border=True):
+                    st.markdown(f"### 🌾 {t(r['crop'])}  \n📍 {disp_unit(r['unit'])}")
+                    st.metric("⚠️ " + t("Spoilage Risk Score"), f"{r['risk']} / 100")
+                    st.metric("⏳ " + t("Shelf Life Remaining"), f"{r['left']} {t('days')}")
+                    g = go.Figure(go.Indicator(
+                        mode="gauge+number", value=r["risk"],
+                        gauge=dict(axis=dict(range=[0, 100]), bar=dict(color=r["color"]),
+                                   steps=[dict(range=[0, 20], color="#dcfce7"),
+                                          dict(range=[20, 50], color="#dbeafe"),
+                                          dict(range=[50, 100], color="#fee2e2")])))
+                    st.plotly_chart(white_fig(g, 220), use_container_width=True, key=f"g{i}")
+        st.subheader("📊 " + t("Risk Score by Crop"))
+        fig = go.Figure(go.Bar(x=[f"{t(r['crop'])} ({disp_unit(r['unit'])})" for r in readings],
+                               y=[r["risk"] for r in readings], marker_color=[r["color"] for r in readings],
+                               text=[f"{r['risk']}%" for r in readings], textposition="outside"))
+        fig.update_layout(yaxis=dict(title=t("Spoilage risk (%)"), range=[0, 110]))
+        st.plotly_chart(white_fig(fig), use_container_width=True)
+        st.caption(LEGEND)
+
+elif page == "Analytics":
+    st.title("📊 " + t("Analytics"))
+    rng = np.random.default_rng(7)
+    months = MONTHS[ss.lang]
+    sold = rng.integers(800, 2500, 12)
+    profit = (sold * rng.uniform(8, 14, 12)).round()
+    loss = (sold * rng.uniform(1, 4, 12)).round()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🛒 " + t("Crop Sold"), f"{int(sold.sum()):,} {t('kg')}")
+    c2.metric("💰 " + t("Profit"), f"₹ {int(profit.sum()):,}")
+    c3.metric("📉 " + t("Loss"), f"₹ {int(loss.sum()):,}")
+
+    fig = go.Figure(go.Bar(x=months, y=sold, marker_color=BLUE))
+    fig.update_layout(title=t("Crop sold per month"))
+    st.plotly_chart(white_fig(fig), use_container_width=True)
+
+    fig = go.Figure()
+    fig.add_bar(x=months, y=profit, name=t("Profit"), marker_color=GREEN)
+    fig.add_bar(x=months, y=loss, name=t("Loss"), marker_color=RED)
+    fig.update_layout(title=t("Profit vs Loss"), barmode="group")
+    st.plotly_chart(white_fig(fig), use_container_width=True)
+
+    st.subheader("🌦️ " + t("Season Trends"))
+    seasons = ["Winter", "Summer", "Monsoon", "Post-Monsoon"]
+    temp, hum = [18, 36, 29, 24], [55, 40, 85, 65]
+    colors = [RED if (a > 33 or b > 80) else GREEN if (a < 22 and b < 60) else BLUE for a, b in zip(temp, hum)]
+    a, b = st.columns(2)
+    f1 = go.Figure(go.Bar(x=[t(s) for s in seasons], y=temp, marker_color=colors))
+    f1.update_layout(title=t("Avg temperature (°C)"))
+    a.plotly_chart(white_fig(f1, 320), use_container_width=True)
+    f2 = go.Figure(go.Bar(x=[t(s) for s in seasons], y=hum, marker_color=colors))
+    f2.update_layout(title=t("Avg humidity (%)"))
+    b.plotly_chart(white_fig(f2, 320), use_container_width=True)
+    st.caption(LEGEND)
+
+elif page == "Alerts":
+    st.title("🚨 " + t("Alerts"))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🔴 " + t("Open"), len(open_alerts))
+    c2.metric("😴 " + t("Snoozed"), len(ss.snoozed))
+    c3.metric("✅ " + t("Resolved this season"), len(ss.read_alerts))
+
+    s1, s2 = st.columns([3, 1])
+    q = s1.text_input("🔍 " + t("Search units, crop, alert and alert rules"), "")
+    s2.markdown("<br>", unsafe_allow_html=True)
+    if s2.button("✔️ " + t("Mark all as read"), use_container_width=True):
+        ss.read_alerts |= {a["id"] for a in alerts}
+        log("Marked all alerts as read")
+        st.rerun()
+
+    def show(level):
+        items = [a for a in alerts if a["id"] not in ss.read_alerts
+                 and (level == "All" or a["level"] == level)
+                 and q.lower() in f"{disp_unit(a['unit'])} {t(a['crop'])} {a['crop']} {a['message']}".lower()]
+        if not items:
+            st.info(t("No open alerts here") + " 🎉")
+        icon = {"Critical": "🔴", "Warning": "🟠", "Info": "🔵"}
+        for a in items:
+            with st.container(border=True):
+                x, y, z = st.columns([5, 1, 1])
+                x.markdown(f"{icon[a['level']]} **{t(a['level'])}** | {disp_unit(a['unit'])} - {t(a['crop'])}\n\n{a['message']}")
+                if y.button(t("Read"), key=f"r_{level}_{a['id']}"):
+                    ss.read_alerts.add(a["id"])
+                    st.rerun()
+                if z.button(t("Snooze"), key=f"s_{level}_{a['id']}"):
+                    ss.snoozed.add(a["id"])
+                    st.rerun()
+
+    cnt = lambda l: sum(a["level"] == l for a in alerts)
+    tabs = st.tabs([f"{t('All')} ({len(alerts)})", f"{t('Critical')} ({cnt('Critical')})",
+                    f"{t('Warning')} ({cnt('Warning')})", f"{t('Info')} ({cnt('Info')})"])
+    for tab, lvl in zip(tabs, ["All", "Critical", "Warning", "Info"]):
+        with tab:
+            show(lvl)
+
+    st.subheader("📣 " + t("Notification Channels"))
+    st.table(pd.DataFrame({
+        t("Level"): ["🔴 " + t("Critical"), "🟠 " + t("Warning"), "🔵 " + t("Info"), "📋 " + t("Device health")],
+        t("Delivery"): [t("SMS + Email immediately"), t("SMS within 15 minutes"),
+                        t("Regular information in app only"), t("Weekly summary")]}))
+    st.subheader("⚙️ " + t("Alert Rules"))
+    st.table(pd.DataFrame([{t("Crop"): t(k), t("Temp") + " (°C)": f"{v['t'][0]}–{v['t'][1]}",
+                            t("Humidity") + " (%)": f"{v['h'][0]}–{v['h'][1]}"}
+                           for k, v in CROPS.items()
+                           if q == "" or q.lower() in k.lower() or q.lower() in t(k).lower()]))
+
+elif page == "Report & History":
+    st.title("📄 " + t("Report & History"))
+    st.caption(t("PDF reports are in English."))
+    storage_df = pd.DataFrame([{"Unit": r["unit"], "Crop": r["crop"], "Qty(kg)": r["qty"], "Temp(C)": r["temp"],
+                                "Hum(%)": r["hum"], "Risk(%)": r["risk"], "Shelf(d)": r["left"],
+                                "Status": r["status"]} for r in readings])
+    alert_df = pd.DataFrame([{"Unit": a["unit"], "Crop": a["crop"], "Level": a["level"]} for a in alerts])
+    hist_df = pd.DataFrame(ss.history) if ss.history else pd.DataFrame({"Time": [], "Event": []})
+    month_df = monthly_series(date.today().year, date.today().month)
+    reports = [("📦", "Storage Report", storage_df), ("🚨", "Alert Report", alert_df),
+               ("🌡️", "Monthly Climate Report", month_df), ("🕘", "Activity History", hist_df)]
+    for icon, title, df in reports:
+        with st.container(border=True):
+            a, b, c = st.columns([3, 1, 1])
+            a.markdown(f"**{icon} {t(title)}**")
+            pdf = make_pdf(title, df)
+            if pdf:
+                b.download_button("⬇️ PDF", pdf, f"{title.replace(' ', '_')}.pdf", "application/pdf", key=f"pdf_{title}")
+            else:
+                b.caption("pip install fpdf2")
+            c.download_button("⬇️ CSV", df.to_csv(index=False), f"{title.replace(' ', '_')}.csv", "text/csv", key=f"csv_{title}")
+    st.subheader("🕘 " + t("History"))
+    st.dataframe(hist_df.rename(columns={"Time": t("Time"), "Event": t("Event")}),
+                 use_container_width=True, hide_index=True)
+
+elif page == "Farmer Profile":
+    st.title("👨‍🌾 " + t("Farmer Profile"))
+    with st.form("profile"):
+        name = st.text_input("👤 " + t("Farmer name"), ss.profile["name"])
+        phone = st.text_input("📱 " + t("Phone number (alerts are sent here)"), ss.profile["phone"])
+        email = st.text_input("✉️ " + t("Email"), ss.profile["email"])
+        if st.form_submit_button(t("Save profile"), type="primary"):
+            ss.profile = {"name": name, "phone": phone, "email": email}
+            log("Farmer profile updated")
+            st.success(t("Profile saved") + " ✅")
